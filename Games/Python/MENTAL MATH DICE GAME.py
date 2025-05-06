@@ -33,29 +33,20 @@ except ImportError:
 
 
 def get_tolerance(operation: str) -> float:
-    """
-    Return the allowed error tolerance for each operation.
-    - sum, difference, multiplication => ±1e-4
-    - division => ±0.05  (larger tolerance, e.g. 1/3 => ~0.3333 => 0.3 is acceptable)
-    """
+    
     if operation == "division":
         return 0.05
     else:
         return 1e-4
 
 def compute_operation(dice_values: List[int], operation: str) -> float:
-    """
-    Given a list of dice_values (integers) and an operation in
-    {"sum","difference","multiplication","division"},
-    return the float result.
-    """
+    
     if not dice_values:
         return 0.0
 
     if operation == "sum":
         return float(sum(dice_values))
     elif operation == "difference":
-        # left-to-right: d1 - d2 - d3 - ...
         result = dice_values[0]
         for d in dice_values[1:]:
             result -= d
@@ -74,20 +65,17 @@ def compute_operation(dice_values: List[int], operation: str) -> float:
         return 0.0
 
 class TimeoutException(Exception):
-    """Raised when user does not respond within the given time."""
     pass
 
 class GameConfig:
     
     
-    DEFAULT_TIMEOUT_SECONDS: int = 12  # 12-second timeout
-    NUM_DICE: int = 12                # Default (for sum/difference), overridden for multiplication/division
-    FACES: int = 6                    # Each die has 6 faces
+    DEFAULT_TIMEOUT_SECONDS: int = 12  
+    NUM_DICE: int = 12                
+    FACES: int = 6                    
 
 class ConfigManager:
-    """
-    Optional singleton for storing config values.
-    """
+    
     _instance = None
 
     def __new__(cls):
@@ -110,7 +98,6 @@ class LoggerLevel:
     CRITICAL = 50
 
 class GameLogger:
-    """Simple console logger with multiple levels."""
     def __init__(self, level: int = LoggerLevel.INFO):
         self._level = level
 
@@ -138,7 +125,6 @@ class GameLogger:
             print(f"{Fore.RED}[CRITICAL]{Style.RESET_ALL} {msg}")
 
 class BaseDice(ABC):
-    """Abstract base class for dice-rolling."""
     @abstractmethod
     def roll(self, override_count: Optional[int] = None) -> List[int]:
         pass
@@ -146,16 +132,13 @@ class BaseDice(ABC):
 
 
 class MultipleDice(BaseDice):
-    """
-    By default, holds 'num_dice' and 'faces', but can override the count at roll-time.
-    """
+    
     def __init__(self, num_dice: int = GameConfig.NUM_DICE, faces: int = GameConfig.FACES):
         self.num_dice = num_dice
         self.faces = faces
         self._last_roll: List[int] = []
 
     def roll(self, override_count: Optional[int] = None) -> List[int]:
-        """Roll override_count dice or self.num_dice if not provided."""
         count = override_count if override_count is not None else self.num_dice
         self._last_roll = [random.randint(1, self.faces) for _ in range(count)]
         return self._last_roll
@@ -163,7 +146,6 @@ class MultipleDice(BaseDice):
 
 
 class Player:
-    """Player class with name, balance, bet mechanics (in USD)."""
     def __init__(self, starting_balance: float):
         self.balance = float(starting_balance)
         self.name = "Player1"
@@ -189,7 +171,6 @@ class GameHistory:
         self.initial_balance: float = 0.0
 
     def set_initial_balance(self, balance: float) -> None:
-        """So the plot can start at round=0 with the player's initial capital."""
         self.initial_balance = balance
 
     def add_record(self,
@@ -233,17 +214,14 @@ class GameHistory:
                 print(f"    Balance=${rec['balance_after']:.2f}")
 
     def show_history_plot(self) -> None:
-        """Displays a 2D line plot of the player's balance, starting at round=0."""
         if not HAS_PLOTTING_LIBS:
             print(f"{Fore.RED}matplotlib/seaborn not installed. Cannot show balance plot.{Fore.RESET}")
             return
 
         import pandas as pd
         data = []
-        # Round 0 with initial balance
         data.append({"round": 0, "balance": self.initial_balance})
 
-        # Then each record from 1..n
         for i, r in enumerate(self.records, start=1):
             data.append({"round": i, "balance": r["balance_after"]})
 
@@ -260,7 +238,6 @@ class GameHistory:
         plt.xlabel("Round Number", fontsize=14)
         plt.ylabel("Balance (USD)", fontsize=14)
 
-        # Annotate each point with its balance
         for x, y in zip(df["round"], df["balance"]):
             plt.text(
                 x, y + 0.2, f"{y:.2f}",
@@ -302,9 +279,7 @@ class GameUI:
                 print(f"{Fore.RED}Invalid input! Please enter a numeric value {Fore.RESET}")
 
     def prompt_operation_choice(self) -> str:
-        """
-        Ask which operation the user wants: sum, difference, multiplication, or division.
-        """
+        
         while True:
             print(f"{Fore.MAGENTA}Choose an operation among: {', '.join(self.ALLOWED_OPERATIONS)}{Fore.RESET}")
             choice = input(f"{Fore.CYAN}Your choice: {Fore.RESET}").strip().lower()
@@ -328,7 +303,6 @@ class GameUI:
         try:
             return float(user_input)
         except ValueError:
-            # If it's not a valid float, treat as automatically incorrect
             return 1e99
 
     def show_timeout_message(self) -> None:
@@ -351,10 +325,7 @@ class GameUI:
         print(f"{Fore.MAGENTA}Thank you for playing Pagane! See you next time.{Fore.RESET}")
 
     def _get_input_with_timeout(self, timeout_seconds: int) -> str:
-        """
-        Wait up to 'timeout_seconds' for user input (single line).
-        If no input arrives, raise TimeoutException.
-        """
+        
         rlist, _, _ = select.select([sys.stdin], [], [], timeout_seconds)
         if rlist:
             return sys.stdin.readline().strip()
@@ -386,27 +357,8 @@ class GameCore:
             cls._instance.initialize()
         return cls._instance
 
-# ====================== MAIN GAME LOGIC ====================== #
 class MarioGame:
-    """
-    Main game logic with dynamic dice counts for the 4 operations.
-    No second question (prime/multiple) is asked anymore.
 
-    Flow:
-      - Ask for player's starting balance
-      - Each round:
-        1. Ask for bet
-        2. Ask which operation
-        3. Roll the appropriate number of dice:
-           - sum or difference => 12
-           - multiplication => 5
-           - division => 3
-        4. Show dice results
-        5. User has 12s to input the operation result.
-        6. If correct, user wins double the bet. Otherwise, loses.
-      - Repeat until user is out of money or chooses to stop.
-      - Print history & show line-plot if possible.
-    """
     def __init__(self):
         self.core = GameCore.instance()
         self.logger = self.core.logger
@@ -420,16 +372,13 @@ class MarioGame:
         self.history = GameHistory()
         self.player: Optional[Player] = None
 
-        # One dice object, we override the count at roll-time
         self.dice = MultipleDice(num_dice=self.default_num_dice, faces=self.faces)
 
     def start_game(self) -> None:
-        """Start the overall game flow."""
         self.logger.info("Starting Pagane game (one-step question, bigger division tolerance).")
         starting_balance = self.ui.prompt_starting_balance()
         self.player = Player(starting_balance)
 
-        # For plotting from round=0
         self.history.set_initial_balance(starting_balance)
 
         try:
@@ -449,38 +398,31 @@ class MarioGame:
                 self.logger.error("Player not initialized")
                 return
 
-            # Check money
             if self.player.balance <= 0:
                 self.logger.info("Player is out of money. Ending game")
                 print(f"{Fore.RED}You have run out of money. Game over{Fore.RESET}")
                 break
 
-            # Prompt for bet
             bet_amount = self.ui.prompt_bet_amount(self.player.balance)
             if not self.player.place_bet(bet_amount):
                 print(f"{Fore.RED}Insufficient funds for that bet!{Fore.RESET}")
                 self.logger.warning("Player tried to bet more than their balance")
                 continue
 
-            # Ask which operation => decide how many dice
             operation_choice = self.ui.prompt_operation_choice()
             if operation_choice in ("sum", "difference"):
                 dice_count = 12
             elif operation_choice == "multiplication":
                 dice_count = 5
-            else:  # "division"
+            else:  
                 dice_count = 3
 
-            # Roll dice
             dice_results = self.dice.roll(override_count=dice_count)
             self.ui.show_dice_results(dice_results)
 
-            # Compute correct value
             correct_value = compute_operation(dice_results, operation_choice)
-            # Get appropriate tolerance
             tol = get_tolerance(operation_choice)
 
-            # Single question => user has 12s
             timed_out = False
             guess_was_correct = False
             user_guess: float = 1e99
@@ -495,7 +437,6 @@ class MarioGame:
                 timed_out = True
 
             if timed_out:
-                # The user automatically loses the bet
                 self.ui.show_current_balance(self.player.balance)
                 self._store_history(
                     dice_results, operation_choice, user_guess, correct_value,
@@ -505,25 +446,20 @@ class MarioGame:
                     break
                 continue
 
-            # Check correctness with tolerance
             if abs(user_guess - correct_value) < tol:
                 guess_was_correct = True
-                # Win double
                 self.player.win_bet(bet_amount * 2)
                 self.ui.show_win_message(bet_amount)
             else:
                 self.ui.show_wrong_message()
 
-            # Show updated balance
             self.ui.show_current_balance(self.player.balance)
 
-            # Store round info
             self._store_history(
                 dice_results, operation_choice, user_guess, correct_value,
                 guess_was_correct, bet_amount, self.player.balance, False
             )
 
-            # Ask if user wants to continue
             if not self.ui.ask_continue():
                 break
 
