@@ -253,7 +253,17 @@ class BlackjackDashboard:
         
     def setup_dashboard(self):
         self.fig = plt.figure(figsize=(14, 8))
-        self.fig.canvas.set_window_title("Blackjack Analytics Dashboard")
+        
+        # Try to set window title, but don't fail if it's not supported
+        try:
+            self.fig.canvas.manager.set_window_title("Blackjack Analytics Dashboard")
+        except (AttributeError, TypeError):
+            # Fallback for backends that don't support setting window title
+            try:
+                self.fig.canvas.set_window_title("Blackjack Analytics Dashboard")
+            except (AttributeError, TypeError):
+                # If neither method works, just continue without setting title
+                pass
         
         gs = gridspec.GridSpec(3, 3)
         
@@ -277,15 +287,19 @@ class BlackjackDashboard:
         self.update_dashboard()
         
     def update_dashboard(self):
-        self._update_capital_chart()
-        self._update_win_rate_chart()
-        self._update_outcome_chart()
-        self._update_stats_table()
-        self._update_deck_gauge()
-        self._update_bet_histogram()
-        
-        self.fig.canvas.draw()
-        self.fig.canvas.flush_events()
+        try:
+            self._update_capital_chart()
+            self._update_win_rate_chart()
+            self._update_outcome_chart()
+            self._update_stats_table()
+            self._update_deck_gauge()
+            self._update_bet_histogram()
+            
+            self.fig.canvas.draw()
+            self.fig.canvas.flush_events()
+        except Exception as e:
+            # If dashboard update fails, print error but don't crash the game
+            print(f"Dashboard update failed: {e}")
         
     def _update_capital_chart(self):
         self.capital_ax.clear()
@@ -378,7 +392,7 @@ class BlackjackDashboard:
             for bar in bars:
                 height = bar.get_height()
                 self.outcome_ax.text(bar.get_x() + bar.get_width()/2., height + 0.1,
-                          f'{height}',
+                          f'{int(height)}',
                           ha='center', va='bottom', fontweight='bold')
             
             total = sum(outcomes.values)
@@ -434,10 +448,13 @@ class BlackjackDashboard:
         r = 1.0
         
         for i, color in enumerate(gauge_colors):
-            self.deck_ax.fill_between(
-                theta[i*25:(i+1)*25], 0, r, 
-                color=color, alpha=0.8
-            )
+            start_idx = i * 25
+            end_idx = min((i + 1) * 25, len(theta))
+            if start_idx < len(theta):
+                self.deck_ax.fill_between(
+                    theta[start_idx:end_idx], 0, r, 
+                    color=color, alpha=0.8
+                )
         
         needle_theta = (percentage / 100) * 180 * np.pi / 180
         self.deck_ax.plot([0, np.sin(needle_theta)], [0, np.cos(needle_theta)], 
@@ -483,7 +500,14 @@ class BlackjackGame:
         self.stats = GameStats()
         self.stats.capital_history.append(self.capital)
         
-        self.dashboard = BlackjackDashboard(self.stats, self.player, self.dealer, self.deck_obj)
+        # Try to create dashboard, but continue if it fails
+        try:
+            self.dashboard = BlackjackDashboard(self.stats, self.player, self.dealer, self.deck_obj)
+            self.dashboard_enabled = True
+        except Exception as e:
+            print(f"Warning: Dashboard could not be initialized: {e}")
+            print("Game will continue without analytics dashboard.")
+            self.dashboard_enabled = False
         
         self.round_number = 0
         self.results_log = []
@@ -662,7 +686,8 @@ class BlackjackGame:
         print(Fore.BLUE + f"\nYour capital: €{self.capital}" + Style.RESET_ALL)
         
         self.stats.add_round(outcome, self.capital, bet)
-        self.dashboard.update_dashboard()
+        if self.dashboard_enabled:
+            self.dashboard.update_dashboard()
         
         return outcome
         
@@ -683,7 +708,8 @@ class BlackjackGame:
                 print(Fore.YELLOW + "\nBoth you and the dealer have Blackjack! Your bet is returned." + Style.RESET_ALL)
                 
                 self.stats.add_round("Tie", self.capital, bet)
-                self.dashboard.update_dashboard()
+                if self.dashboard_enabled:
+                    self.dashboard.update_dashboard()
                 return "Tie"
                 
             elif player_blackjack:
@@ -697,7 +723,8 @@ class BlackjackGame:
                 print(Fore.GREEN + f"\n💰 Blackjack pays 3:2! You win €{blackjack_payout - bet}." + Style.RESET_ALL)
                 
                 self.stats.add_round("Blackjack", self.capital, bet)
-                self.dashboard.update_dashboard()
+                if self.dashboard_enabled:
+                    self.dashboard.update_dashboard()
                 return "Blackjack"
                 
             elif dealer_blackjack:
@@ -707,7 +734,8 @@ class BlackjackGame:
                 print(Fore.RED + "\nDealer has Blackjack. You lose your bet." + Style.RESET_ALL)
                 
                 self.stats.add_round("Lose", self.capital, bet)
-                self.dashboard.update_dashboard()
+                if self.dashboard_enabled:
+                    self.dashboard.update_dashboard()
                 return "Lose"
         
         return None
@@ -725,7 +753,8 @@ class BlackjackGame:
             self.player.add_loss(bet)
             
             self.stats.add_round("Bust", self.capital, bet)
-            self.dashboard.update_dashboard()
+            if self.dashboard_enabled:
+                self.dashboard.update_dashboard()
             return "Bust"
             
         self.dealer_turn()
@@ -795,7 +824,8 @@ class BlackjackGame:
                     outcome2 = self.play_single_hand(original_bet)
                     
                     self.stats.add_split_round(outcome1, outcome2, self.capital, bet)
-                    self.dashboard.update_dashboard()
+                    if self.dashboard_enabled:
+                        self.dashboard.update_dashboard()
                     return
             else:
                 print(Fore.RED + "❌ You don't have enough capital to split." + Style.RESET_ALL)
@@ -822,6 +852,10 @@ class BlackjackGame:
         print(Fore.WHITE + "🃏 Get as close to 21 as possible without going over." + Style.RESET_ALL)
         print(Fore.WHITE + "💰 Blackjack pays 3:2" + Style.RESET_ALL)
         print(Fore.WHITE + "🎯 Dealer must hit on 16 and stand on 17" + Style.RESET_ALL)
+        if self.dashboard_enabled:
+            print(Fore.GREEN + "📊 Analytics dashboard is enabled!" + Style.RESET_ALL)
+        else:
+            print(Fore.YELLOW + "⚠️  Analytics dashboard is disabled due to display issues." + Style.RESET_ALL)
         print(Fore.CYAN + "-" * 50 + "\n" + Style.RESET_ALL)
         
         input(Fore.GREEN + "Press Enter to start playing..." + Style.RESET_ALL)
@@ -866,8 +900,11 @@ class BlackjackGame:
         
         print("\n" + Fore.MAGENTA + "Thank you for playing Mario's Blackjack!" + Style.RESET_ALL)
         
-        print(Fore.BLUE + "\nYour game analytics dashboard is still open." + Style.RESET_ALL)
-        print(Fore.BLUE + "Press Enter to close the game completely..." + Style.RESET_ALL)
+        if self.dashboard_enabled:
+            print(Fore.BLUE + "\nYour game analytics dashboard is still open." + Style.RESET_ALL)
+            print(Fore.BLUE + "Press Enter to close the game completely..." + Style.RESET_ALL)
+        else:
+            print(Fore.BLUE + "\nPress Enter to exit..." + Style.RESET_ALL)
         
     def run(self):
         self.display_welcome()
@@ -875,7 +912,8 @@ class BlackjackGame:
         while self.capital > 0:
             self.play_round()
             
-            self.dashboard.update_dashboard()
+            if self.dashboard_enabled:
+                self.dashboard.update_dashboard()
             
             if self.capital <= 0:
                 print(Fore.RED + "\n💸 You have no more capital. Game over!" + Style.RESET_ALL)
@@ -889,8 +927,9 @@ class BlackjackGame:
                 
         self.show_final_summary()
         input()  
-        plt.ioff()
-        plt.show(block=True)  
+        if self.dashboard_enabled:
+            plt.ioff()
+            plt.show(block=True)  
 
 
 if __name__ == "__main__":
@@ -898,7 +937,7 @@ if __name__ == "__main__":
     print(Fore.CYAN + """
     ╔══════════════════════════════════════════════════╗
     ║                                                  ║
-    ║        🎮  MARIO'S BLACKJACK CASINO  🎮         ║
+    ║        🎮  MARIO'S BLACKJACK CASINO  🎮           ║
     ║                                                  ║
     ╚══════════════════════════════════════════════════╝
     """ + Style.RESET_ALL)
